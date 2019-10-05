@@ -19,12 +19,76 @@
 ;;============================================================================
 
 
-
 (def denorm-data {:a [[:b 1]] :b [:b 1]})
 
+
 (def app-db
-  ;; These are unique for an individual
-  {:email/id  {1 {:email/id  1
+  {:denorm       {:level-1 {:level-2 denorm-data}}
+   ;; All people with relationship to other people as children and spouses
+   :person/id    {1 {:person/id       1
+                     :person/name     "person-1"
+                     :person/spouse   [:person/id 2]
+                     :person/email    [:email/id 1]
+                     :person/cars     [[:car/id 1]]
+                     :person/accounts [[:account/id 1]
+                                       [:account/id 2]]
+                     :person/children [:person/id 3
+                                       :person/id 4
+                                       :person/id 5]}
+                  2 {:person/id       2
+                     :person/email    [:email/id 2]
+                     :person/name     "person-2"
+                     :person/spouse   [:person/id 1]
+                     :person/cars     [[:car/id 2]]
+                     :person/accounts [[:account/id 3]]
+                     :person/children [:person/id 3
+                                       :person/id 4
+                                       :person/id 5]}
+                  3 {:person/id       3
+                     :person/email    [:email/id 3]
+                     :person/name     "person-3"
+                     :person/spouse   nil
+                     :person/accounts nil
+                     :person/cars     nil
+                     :person/children nil}
+                  4 {:person/id       4
+                     :person/email    [:email/id 4]
+                     :person/name     "person-4"
+                     :person/spouse   [:person/id 6]
+                     :person/accounts [[:account/id 4]]
+                     :person/cars     [[:car/id 4]]
+                     :person/children [:person/id 8]}
+                  5 {:person/id       5
+                     :person/email    [:email/id 5]
+                     :person/name     "person-5"
+                     :person/spouse   nil
+                     :person/accounts [[:account/id 5]]
+                     :person/cars     [[:car/id 4]]
+                     :person/children nil}
+                  6 {:person/id       6
+                     :person/email    [:email/id 6]
+                     :person/name     "person-6"
+                     :person/spouse   [:person/id 4]
+                     :person/accounts [[:account/id 6]]
+                     :person/cars     [[:car/id 1]
+                                       [:car/id 2]]
+                     :person/children [:person/id 7]}
+                  7 {:person/id       7
+                     :person/email    [:email/id 7]
+                     :person/name     "person-7"
+                     :person/spouse   nil
+                     :person/accounts [[:account/id 7]]
+                     :person/cars     [[:car/id 5]]
+                     :person/children nil}
+                  8 {:person/id       8
+                     :person/email    [:email/id 8]
+                     :person/name     nil
+                     :person/accounts nil
+                     :person/spouse   nil
+                     :person/cars     nil
+                     :person/children nil}}
+   ;; These are unique for an individual
+   {:email/id {1 {:email/id  1
                   :email/url "1@test.com"}
                2 {:email/id  2
                   :email/url "2@test.com"}
@@ -37,102 +101,57 @@
                6 {:email/id  6
                   :email/url "6@test.com"}
                7 {:email/id  7
-                  :email/url "7@test.com"}}
-  ;; All people with relationship to other people as children and spouses
-   :person/id {1 {:person/id       1
-                  :person/name     "person-1"
-                  :person/spouse   [:person/id 2]
-                  :person/email    [:email/id 1]
-                  :person/cars     [[:car/id 1]]
-                  :person/children [:person/id 3
-                                    :person/id 4
-                                    :person/id 5]}
-               2 {:person/id       2
-                  :person/email    [:email/id 2]
-                  :person/name     "person-2"
-                  :person/spouse   [:person/id 1]
-                  :person/cars     [[:car/id 2]]
-                  :person/children [:person/id 3
-                                    :person/id 4
-                                    :person/id 5]}
-               3 {:person/id       3
-                  :person/email    [:email/id 3]
-                  :person/name     "person-3"
-                  :person/spouse   nil
-                  :person/cars     nil
-                  :person/children nil}
-               4 {:person/id       4
-                  :person/email    [:email/id 4]
-                  :person/name     "person-4"
-                  :person/spouse   [:person/id 6]
-                  :person/cars     [[:car/id 4]]
-                  :person/children [:person/id 8]}
-               5 {:person/id       5
-                  :person/email    [:email/id 5]
-                  :person/name     "person-5"
-                  :person/spouse   nil
-                  :person/cars     [[:car/id 4]]
-                  :person/children nil}
-               6 {:person/id       6
-                  :person/email    [:email/id 6]
-                  :person/name     "person-6"
-                  :person/spouse   [:person/id 4]
-                  :person/cars     [[:car/id 1]
-                                    [:car/id 2]]
-                  :person/children [:person/id 7]}
-               7 {:person/id       7
-                  :person/email    [:email/id 7]
-                  :person/name     "person-7"
-                  :person/spouse   nil
-                  :person/cars     [[:car/id 5]]
-                  :person/children nil}
-               8 {:person/id       8
-                  :person/email    [:email/id 8]
-                  :person/name     nil
-                  :person/spouse   nil
-                  :person/cars     nil
-                  :person/children nil}}
-;; All cars, the same car model could belong to multiple people
-;; Different car models could have same engine
-   :car/id    {1 {:car/id     1
-                  :car/model  "car-1"
-                  :car/engine [:engine/id 1]}
-               2 {:car/id     2
-                  :car/model  "car-2"
-                  :car/engine [:engine/id 2]}
-               3 {:car/id     3
-                  :car/model  "car-3"
-                  :car/engine [:engine/id 3]}
-               4 {:car/id     4
-                  :car/model  "car-4"
-                  :car/engine [:engine/id 2]}
-               5 {:car/id     5
-                  :car/model  "car-5"
-                  :car/engine [:engine/id 4]}}
-
-   :engine/id {1 {:engine/id    1
-                  :engine/model "engine-1"}
-
-               2 {:engine/id    2
-                  :engine/model "engine-2"}
-
-               3 {:engine/id    3
-                  :engine/model "engine-3"}
-
-               4 {:engine/id    4
-                  :engine/model "engine-4"}}
-
-   :denorm    {:level-1 {:level-2 denorm-data}}
-
-   :fastest-car [:car/id 3]
-
+                  :email/url "7@test.com"}
+   ;; Bank accounts which are removed when a person is removed and are uniquely owned
+                 {:accounts/id {1 {:account/id   1
+                                   :account/name "account-1"}
+                                2 {:account/id   2
+                                   :account/name "account-2"}
+                                3 {:account/id   3
+                                   :account/name "account-3"}
+                                4 {:account/id   4
+                                   :account/name "account-4"}
+                                5 {:account/id   5
+                                   :account/name "account-5"}
+                                6 {:account/id   6
+                                   :account/name "account-6"}
+                                7 {:account/id   7
+                                   :account/name "account-7"}}}}}
+   ;; All cars, the same car model could belong to multiple people
+   ;; Different car models could have same engine
+   :car/id       {1 {:car/id     1
+                     :car/model  "car-1"
+                     :car/engine [:engine/id 1]}
+                  2 {:car/id     2
+                     :car/model  "car-2"
+                     :car/engine [:engine/id 2]}
+                  3 {:car/id     3
+                     :car/model  "car-3"
+                     :car/engine [:engine/id 3]}
+                  4 {:car/id     4
+                     :car/model  "car-4"
+                     :car/engine [:engine/id 2]}
+                  5 {:car/id     5
+                     :car/model  "car-5"
+                     :car/engine [:engine/id 4]}}
+   :engine/id    {1 {:engine/id    1
+                     :engine/model "engine-1"}
+                  2 {:engine/id    2
+                     :engine/model "engine-2"}
+                  3 {:engine/id    3
+                     :engine/model "engine-3"}
+                  4 {:engine/id    4
+                     :engine/model "engine-4"}}
+   :fastest-car  [:car/id 3]
    :grandparents [[:person/id 1]
                   [:person/id 2]]
-
-   :deceased  [[:person/id 8]]})
+   :deceased     [[:person/id 8]]})
 
 
 ;;============================================================================
+
+;; if the tree path doesn't exist in the normalized data then return nil/path ???
+
 
 (>defn tree-path->db-path
        "Convert a 'denormalized' path into a normalized one by walking the path in state and honoring ident-based edges.
@@ -151,28 +170,31 @@
         [map? vector? => vector?]
         (loop [[h & t] path
                new-path []]
-          (if h
-            (let [np (conj new-path h)
-                  c (clojure.core/get-in state np)]
-              (if (eql/ident? c)
-                (recur t c)
-                (recur t (conj new-path h))))
-            (if (not= path new-path)
-              new-path)))))
+              (if h
+                (let [np (conj new-path h)
+                      c (clojure.core/get-in state np)]
+                     (if (eql/ident? c)
+                       (recur t c)
+                       (recur t (conj new-path h))))
+                (if (not= path new-path)
+                  new-path
+                  path)))))
 
 (comment
 
-   (tree-path->db-path app-db [:person/id 1 :person/spouse])
+  (tree-path->db-path app-db [:person/id 1 :person/cars 0 :car/engine :engine/model])
 
-   (tree-path->db-path app-db [:person/id 3 :person/spouse])
+  (tree-path->db-path app-db [:person/id 6 :person/spouse])
 
-   (tree-path->db-path app-db [:person/id 4 :person/spouse :person/name])
+  (tree-path->db-path app-db [:person/id 3 :person/email])
+
+  (tree-path->db-path app-db [:person/id 9 :person/email])
 
   '())
 
 
-
 ;;============================================================================
+
 
 (>defn get-in
        "Just like clojure.core/get-in, but if an element of the path is an ident it will follow the ident instead."
@@ -184,16 +206,31 @@
         [map? vector? any? => any?]
         (clojure.core/get-in state-map (tree-path->db-path state-map path) not-found)))
 
-
-
 (comment
+  (tree-path->db-path {:a [:b 1]
+                       :b {1 {:c [:d 1]}}
+                       :d {1 {:value 42}}}
 
-  (get-in app-db [:person/id 1 :person/spouse])
+                      [:a :c :value])
+
+  (tree-path->db-path {:a {:c {:value 42}}}
+                      [:a :c :value])
+
+  (clojure.core/get-in
+    {:a {:c {:value 42}}}
+    [:a :c :value])
+
+  (get-in
+    {:a {:c {:value 42}}}
+    [:a :c :value])
+
+  (tree-path->db-path app-db [:person/id 1 :person/cars 0 :car/engine :engine/model])
+
+  (get-in app-db [:person/id 1 :person/cars 0 :car/engine :engine/model])
+
+  (get-in app-db [:person/id 3 :person/cars 0 :car/engine :engine/model])
 
   '())
-
-
-
 
 
 ;;============================================================================
@@ -216,8 +253,8 @@
 
 (defn- dissoc-in
        "Dissociates an entry from a nested associative structure returning a new
-            nested structure. keys is a sequence of keys. Any empty maps that result
-            will not be present in the new structure."
+                      nested structure. keys is a sequence of keys. Any empty maps that result
+                      will not be present in the new structure."
        [m [k & ks :as keys]]
        (if ks
          (if-let [nextmap (get m k)]
@@ -231,26 +268,25 @@
 
 
 ;; FIXME should also prune nils
+
+
 (defn- purge-ident
-  "Removes the dangling pointers to a `nil` caused by the removal of an ident
-  at the toplevel. "
-  [state-map [a-path a-value] ident]
-  (let [vector-of-vectors? (if (and
-                                (vector? a-value)
-                                (every? vector? a-value))
-                             true
-                             false)]
-    (cond
-      ;; nil => dissoc from map
-      (nil? a-value) (dissoc-in state-map a-path)
-      ;; to-many => update the path
-      vector-of-vectors? (assoc-in state-map a-path (apply vector (remove #{ident} a-value)))
-      ;;to-one => remove from the state-map
-      (vector? a-value) (if (= ident a-value)
-                          (dissoc-in state-map a-path)))))
-
-
-
+       "Removes the dangling pointers to a `nil` caused by the removal of an ident
+            at the toplevel. "
+       [state-map [a-path a-value] ident]
+       (let [vector-of-vectors? (if (and
+                                      (vector? a-value)
+                                      (every? vector? a-value))
+                                  true
+                                  false)]
+            (cond
+              ;; nil => dissoc from map
+              (nil? a-value) (dissoc-in state-map a-path)
+              ;; to-many => update the path
+              vector-of-vectors? (assoc-in state-map a-path (apply vector (remove #{ident} a-value)))
+              ;;to-one => remove from the state-map
+              (vector? a-value) (if (= ident a-value)
+                                  (dissoc-in state-map a-path)))))
 
 (>defn remove-entity*
        "Remove the given entity at the given ident. Also scans all tables and removes any to-one or to-many idents that are
@@ -268,6 +304,8 @@
 
        ;;TODO implement the cascading feature
        ;; NOTE keywords in cascading should be uniquely owned
+
+
        ([state-map ident cascade]
         [map? eql/ident? (s/coll-of keyword? :kind set?) => map?]
         (let [ident ident
@@ -291,9 +329,6 @@
                      state-after-ident-dissoc
                      path-values-map))))
 
-
-
-
 (comment
 
   (def denorm-data {:a [[:b 1]] :b [:b 1]})
@@ -306,49 +341,85 @@
                  :e [[:b 1] [:d 1]]}}
      :d      {1 {:value 42}}})
 
+  (defn vector-of-vectors? [a-value]
+        (if (and
+              (vector? a-value)
+              (every? vector? a-value))
+          true
+          false))
+
+  (defn nil-or-vector? [a-value] (or (nil? a-value))
+        (vector? a-value))
+
+  (defn state-after-top-level-ident-dissoc [ident]
+        (-> app-db (dissoc-in ident)))
+
+  (state-after-top-level-ident-dissoc [:person/id 1])
+
+  (defn all-paths-after-dissoc-and-denorm-keys
+        [ident]
+        (filter
+          (fn [a-path]
+              (if (< (count a-path) 4)
+                true
+                false))
+          (paths (state-after-top-level-ident-dissoc ident))))
+
+  (all-paths-after-dissoc-and-denorm-keys [:person/id 1])
+
+  (all-paths-after-dissoc-and-denorm-keys [:person/id 1])
+
+  (get-in (state-after-top-level-ident-dissoc [:person/id 1])
+          [:person/id 2 :person/children])
+
+  (get-in (state-after-top-level-ident-dissoc [:person/id 1])
+          [:person/id 2 :person/spouse])
+
+  (get-in (state-after-top-level-ident-dissoc [:person/id 1])
+          [:deceased])
+
+  (zipmap
+    (all-paths-after-dissoc-and-denorm-keys [:person/id 1])
+    (map #(get-in (state-after-top-level-ident-dissoc [:person/id 1]) %)
+         (all-paths-after-dissoc-and-denorm-keys [:person/id 1])))
 
 
-  (let [ident ident
-              nil-or-vector? (fn [x] (or (nil? x)
-                                         (vector? x)))
-              state-after-ident-dissoc (-> state-map (dissoc-in ident))
-              all-paths-after-dissoc-and-denorm-keys (filter
-                                                       (fn [a-path]
-                                                           (if (< (count a-path) 4)
-                                                             true
-                                                             false))
-                                                       (paths state-after-ident-dissoc))
-              path-values-map (into {}
-                                    (filter #(nil-or-vector? (second %))
-                                            (zipmap
-                                              all-paths-after-dissoc-and-denorm-keys
-                                              (map #(get-in state-after-ident-dissoc %)
-                                                   all-paths-after-dissoc-and-denorm-keys))))
-             (reduce #(purge-ident %1 %2 ident)
-                     state-after-ident-dissoc
-                     path-values-map)])
+
+  ;; TODO use this to keep the ident form in to-one joins
+  ;; this will return normalized db path for all values which are maps and are in the db else will return the same data
 
 
+  (tree-path->db-path app-db [:person/id 6 :person/spouse])
 
+  (zipmap
+    (all-paths-after-dissoc-and-denorm-keys [:person/id 1])
+    (map #(tree-path->db-path (state-after-top-level-ident-dissoc [:person/id 1]) %)
+         (all-paths-after-dissoc-and-denorm-keys [:person/id 1])))
 
+  (def path-values-map (into {}
+                             (filter #(nil-or-vector? (second %))
+                                     (zipmap
+                                       all-paths-after-dissoc-and-denorm-keys
+                                       (map #(get-in state-after-top-level-ident-dissoc %)
+                                            all-paths-after-dissoc-and-denorm-keys)))))
 
-
+  (reduce #(purge-ident %1 %2 ident)
+          state-after-top-level-ident-dissoc
+          path-values-map)
 
   (remove-entity* original-state [:d 1])
 
   (remove-entity* original-state [:b 1])
 
-
   (remove-entity* app-db [:person/id 1])
 
 
   ;; should remove this value only if it is uniquely owned by [:person/id 1]
+
+
   (remove-entity* app-db [:person/id 1] #{:person/email})
 
-
   (paths app-db)
-
-
 
   '())
 
@@ -361,5 +432,7 @@
 
 
        ;; TODO needs cascade argument like remove-entity*
+
+
        ([state-map path-to-edge cascade]
         [map? vector? (s/coll-of keyword? :kind set?) => map?]))
