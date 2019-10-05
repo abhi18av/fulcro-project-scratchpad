@@ -50,7 +50,7 @@
                2 {:person/id       2
                   :person/email    [:email/id 2]
                   :person/name     "person-2"
-                  :person/spouse   [:person/id 2]
+                  :person/spouse   [:person/id 1]
                   :person/cars     [[:car/id 2]]
                   :person/children [:person/id 3
                                     :person/id 4
@@ -134,7 +134,6 @@
 
 ;;============================================================================
 
-
 (>defn tree-path->db-path
        "Convert a 'denormalized' path into a normalized one by walking the path in state and honoring ident-based edges.
 
@@ -150,21 +149,28 @@
   "
        ([state path]
         [map? vector? => vector?]
-        (tree-path->db-path state path path))
-
-       ([state path not-found]
-        [map? vector? any? => vector?]
         (loop [[h & t] path
                new-path []]
-              (if h
-                (let [np (conj new-path h)
-                      c (clojure.core/get-in state np)]
-                     (if (eql/ident? c)
-                       (recur t c)
-                       (recur t (conj new-path h))))
-                (if (not= path new-path)
-                  new-path
-                  not-found)))))
+          (if h
+            (let [np (conj new-path h)
+                  c (clojure.core/get-in state np)]
+              (if (eql/ident? c)
+                (recur t c)
+                (recur t (conj new-path h))))
+            (if (not= path new-path)
+              new-path)))))
+
+(comment
+
+   (tree-path->db-path app-db [:person/id 1 :person/spouse])
+
+   (tree-path->db-path app-db [:person/id 3 :person/spouse])
+
+   (tree-path->db-path app-db [:person/id 4 :person/spouse :person/name])
+
+  '())
+
+
 
 ;;============================================================================
 
@@ -177,6 +183,17 @@
        ([state-map path not-found]
         [map? vector? any? => any?]
         (clojure.core/get-in state-map (tree-path->db-path state-map path) not-found)))
+
+
+
+(comment
+
+  (get-in app-db [:person/id 1 :person/spouse])
+
+  '())
+
+
+
 
 
 ;;============================================================================
@@ -213,7 +230,7 @@
 
 
 
-
+;; FIXME should also prune nils
 (defn- purge-ident
   "Removes the dangling pointers to a `nil` caused by the removal of an ident
   at the toplevel. "
@@ -250,6 +267,7 @@
 
 
        ;;TODO implement the cascading feature
+       ;; NOTE keywords in cascading should be uniquely owned
        ([state-map ident cascade]
         [map? eql/ident? (s/coll-of keyword? :kind set?) => map?]
         (let [ident ident
@@ -276,9 +294,6 @@
 
 
 
-
-
-
 (comment
 
   (def denorm-data {:a [[:b 1]] :b [:b 1]})
@@ -292,16 +307,43 @@
      :d      {1 {:value 42}}})
 
 
-  (remove-entity* original-state [:d 1])
 
-  (remove-entity* original-state [:d 1] #{:x})
+  (let [ident ident
+              nil-or-vector? (fn [x] (or (nil? x)
+                                         (vector? x)))
+              state-after-ident-dissoc (-> state-map (dissoc-in ident))
+              all-paths-after-dissoc-and-denorm-keys (filter
+                                                       (fn [a-path]
+                                                           (if (< (count a-path) 4)
+                                                             true
+                                                             false))
+                                                       (paths state-after-ident-dissoc))
+              path-values-map (into {}
+                                    (filter #(nil-or-vector? (second %))
+                                            (zipmap
+                                              all-paths-after-dissoc-and-denorm-keys
+                                              (map #(get-in state-after-ident-dissoc %)
+                                                   all-paths-after-dissoc-and-denorm-keys))))
+             (reduce #(purge-ident %1 %2 ident)
+                     state-after-ident-dissoc
+                     path-values-map)])
+
+
+
+
+
+
+
+  (remove-entity* original-state [:d 1])
 
   (remove-entity* original-state [:b 1])
 
-  (remove-entity* original-state [:b 1] #{:x})
-
 
   (remove-entity* app-db [:person/id 1])
+
+
+  ;; should remove this value only if it is uniquely owned by [:person/id 1]
+  (remove-entity* app-db [:person/id 1] #{:person/email})
 
 
   (paths app-db)
