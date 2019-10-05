@@ -316,6 +316,8 @@
         (paths (state-after-top-level-ident-dissoc ident))))
 
 
+
+
 (defn entity-path-value-map-after-dissoc [a-path ident]
       (let [value-at-path (get-in (state-after-top-level-ident-dissoc ident) a-path)]
            (if (map? value-at-path)
@@ -389,11 +391,16 @@
 (comment
 
 
+  ;;;;;;
+
+  ;; NOTE path-db after dissoc and denorm
   (let [ident [:person/id 1]]
        (zipmap
          (all-paths-after-dissoc-and-denorm-keys ident)
          (map #(entity-path-value-map-after-dissoc % ident)
               (all-paths-after-dissoc-and-denorm-keys ident))))
+
+  ;;;;;;
 
 
   '())
@@ -401,16 +408,78 @@
 ;;============================================================================
 
 (>defn remove-edge*
-       ;; TODO
        ([state-map path-to-edge]
-        [map? vector? => any?])
-
+        [map? vector? => any?]
+        (remove-edge* state-map path-to-edge #{}))
 
        ;; TODO needs cascade argument like remove-entity*
 
 
        ([state-map path-to-edge cascade]
         [map? vector? (s/coll-of keyword? :kind set?) => map?]))
+
+
+;;;;;;;;;;;
+
+
+(def all-paths-original-data
+  (paths app-db))
+
+
+
+(defn entity-path-value-map-original-data [a-path]
+  (let [value-at-path (get-in app-db a-path)]
+    (if (map? value-at-path)
+      (tree-path->db-path app-db a-path)
+      value-at-path)))
+
+
+;; NOTE path-db original data
+(def paths-db-original-data
+  (zipmap
+   all-paths-original-data
+   (map #(entity-path-value-map-original-data %)
+        all-paths-original-data)))
+
+;; TODO a function to re-create the original db without the nil values
+
+
+(defn prune-nils [app-db [a-path a-value]]
+  (cond
+    (nil? a-value) (dissoc-in app-db a-path)
+    :else app-db))
+
+
+(def nil-pruned-original-db
+  (reduce prune-nils
+          app-db
+          paths-db-original-data))
+
+
+
+
+(comment
+
+
+
+  {:fastest-car [:car/id 1]
+   :car/id      {1 {:car/engine [:engine/id 1]}}
+   :engine/id   {1 {:engine/id    1
+                    :engine/model "engine-1"}}}
+
+  (remove-edge* state [:car/id 1 :car/engine])
+  "Refuses to remove something that is not a normalized edge"
+  (remove-edge* state [:engine/id 1 :engine/model])
+  (remove-edge* state [:engine/id 1])
+  (remove-edge* state [:engine/id])
+
+
+
+
+
+  '())
+
+
 
 ;;;;;;;;;;;;
 
