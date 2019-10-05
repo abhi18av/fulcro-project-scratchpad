@@ -86,20 +86,38 @@
                                :person/cars     nil
                                :person/children nil}}
              ;; These are unique for an individual
-             :email/id     {1 {:email/id  1
-                               :email/url "1@test.com"}
-                            2 {:email/id  2
-                               :email/url "2@test.com"}
-                            3 {:email/id  3
-                               :email/url "3@test.com"}
-                            4 {:email/id  4
-                               :email/url "4@test.com"}
-                            5 {:email/id  5
-                               :email/url "5@test.com"}
-                            6 {:email/id  6
-                               :email/url "6@test.com"}
-                            7 {:email/id  7
-                               :email/url "7@test.com"}}
+             :email/id     {1 {:email/id       1
+                               :email/url      "1@test.com"
+                               :email/provider [:provider/id 1]}
+                            2 {:email/id       2
+                               :email/url      "2@test.com"
+                               :email/provider [:provider/id 1]}
+                            3 {:email/id       3
+                               :email/url      "3@test.com"
+                               :email/provider [:provider/id 3]}
+                            4 {:email/id       4
+                               :email/url      "4@test.com"
+                               :email/provider [:provider/id 1]}
+                            5 {:email/id       5
+                               :email/url      "5@test.com"
+                               :email/provider [:provider/id 2]}
+                            6 {:email/id       6
+                               :email/url      "6@test.com"
+                               :email/provider [:provider/id 3]}
+                            7 {:email/id       7
+                               :email/url      "7@test.com"
+                               :email/provider [:provider/id 2]}
+                            8 {:email/id       8
+                               :email/url      "8@test.com"
+                               :email/provider [:provider/id 3]}}
+             :provider/id  {1 {:provider/id   1
+                               :provider/name "Google"}
+                            2 {:provider/id   2
+                               :provider/name "Microsoft"}
+                            3 {:provider/id   3
+                               :provider/name "Tencent"}
+                            4 {:provider/id   4
+                               :provider/name "Yahoo"}}
              ;; Bank accounts which are removed when a person is removed and are uniquely owned
              :accounts/id  {1 {:account/id   1
                                :account/name "account-1"}
@@ -275,27 +293,36 @@
    :d      {1 {:value 42}}})
 
 (defn vector-of-vectors? [a-value]
-  (if (and
-       (vector? a-value)
-       (every? vector? a-value))
-    true
-    false))
+      (if (and
+            (vector? a-value)
+            (every? vector? a-value))
+        true
+        false))
 
 (defn nil-or-vector? [a-value] (or (nil? a-value))
-  (vector? a-value))
+      (vector? a-value))
 
 (defn state-after-top-level-ident-dissoc [ident]
-  (-> app-db (dissoc-in ident)))
+      (-> app-db (dissoc-in ident)))
 
 
 (defn all-paths-after-dissoc-and-denorm-keys
-  [ident]
-  (filter
-   (fn [a-path]
-     (if (< (count a-path) 4)
-       true
-       false))
-   (paths (state-after-top-level-ident-dissoc ident))))
+      [ident]
+      (filter
+        (fn [a-path]
+            (if (< (count a-path) 4)
+              true
+              false))
+        (paths (state-after-top-level-ident-dissoc ident))))
+
+
+(defn entity-path-value-map-after-dissoc [a-path ident]
+      (let [value-at-path (get-in (state-after-top-level-ident-dissoc ident) a-path)]
+           (if (map? value-at-path)
+             (tree-path->db-path app-db a-path)
+             value-at-path)))
+
+
 
 
 ;; FIXME should also prune nils
@@ -361,93 +388,13 @@
 
 (comment
 
-  (state-after-top-level-ident-dissoc [:person/id 1])
 
-  (all-paths-after-dissoc-and-denorm-keys [:person/id 1])
+  (let [ident [:person/id 1]]
+       (zipmap
+         (all-paths-after-dissoc-and-denorm-keys ident)
+         (map #(entity-path-value-map-after-dissoc % ident)
+              (all-paths-after-dissoc-and-denorm-keys ident))))
 
-  (get-in (state-after-top-level-ident-dissoc [:person/id 1])
-          [:person/id 2 :person/spouse])
-
-  (get-in (state-after-top-level-ident-dissoc [:person/id 1])
-          [:deceased])
-
-
-  (tree-path->db-path app-db [:person/id 4 :person/spouse])
-
-
-  (tree-path->db-path state-after-top-level-ident-dissoc [:person/id 4 :person/spouse])
-
-
-  (defn fun [a-path]
-    (let [value-at-path  (get-in (state-after-top-level-ident-dissoc [:person/id 1]) a-path)]
-      (if (map? value-at-path)
-        (tree-path->db-path app-db a-path)
-        value-at-path)))
-
-
-
-
-  (map fun
-       (all-paths-after-dissoc-and-denorm-keys [:person/id 1]))
-
-
-  (zipmap
-   (all-paths-after-dissoc-and-denorm-keys [:person/id 1])
-   (map fun
-        (all-paths-after-dissoc-and-denorm-keys [:person/id 1])))
-
-
-
-
-
-
-
-  (map #(get-in (state-after-top-level-ident-dissoc [:person/id 1]) %)
-       (all-paths-after-dissoc-and-denorm-keys [:person/id 1]))
-
-
-  (zipmap
-    (all-paths-after-dissoc-and-denorm-keys [:person/id 1])
-    (map #(get-in (state-after-top-level-ident-dissoc [:person/id 1]) %)
-         (all-paths-after-dissoc-and-denorm-keys [:person/id 1])))
-
-
-
-  ;; TODO use this to keep the ident form in to-one joins
-  ;; this will return normalized db path for all values which are maps and are in the db else will return the same data
-
-
-  (tree-path->db-path app-db [:person/id 6 :person/spouse])
-
-  (zipmap
-    (all-paths-after-dissoc-and-denorm-keys [:person/id 1])
-    (map #(tree-path->db-path (state-after-top-level-ident-dissoc [:person/id 1]) %)
-         (all-paths-after-dissoc-and-denorm-keys [:person/id 1])))
-
-  (def path-values-map (into {}
-                             (filter #(nil-or-vector? (second %))
-                                     (zipmap
-                                       all-paths-after-dissoc-and-denorm-keys
-                                       (map #(get-in state-after-top-level-ident-dissoc %)
-                                            all-paths-after-dissoc-and-denorm-keys)))))
-
-  (reduce #(purge-ident %1 %2 ident)
-          state-after-top-level-ident-dissoc
-          path-values-map)
-
-  (remove-entity* original-state [:d 1])
-
-  (remove-entity* original-state [:b 1])
-
-  (remove-entity* app-db [:person/id 1])
-
-
-  ;; should remove this value only if it is uniquely owned by [:person/id 1]
-
-
-  (remove-entity* app-db [:person/id 1] #{:person/email})
-
-  (paths app-db)
 
   '())
 
@@ -464,3 +411,129 @@
 
        ([state-map path-to-edge cascade]
         [map? vector? (s/coll-of keyword? :kind set?) => map?]))
+
+;;;;;;;;;;;;
+
+
+
+{[:accounts/id 1 :account/id]    1,
+ [:car/id 1 :car/model]          "car-1",
+ [:accounts/id 7 :account/id]    7,
+ [:person/id 6 :person/cars]     [[:car/id 1] [:car/id 2]],
+ [:provider/id 1 :provider/id]   1,
+ [:provider/id 4 :provider/name] "Yahoo",
+ [:person/id 8 :person/spouse]   nil,
+ [:accounts/id 4 :account/name]  "account-4",
+ [:email/id 5 :email/url]        "5@test.com",
+ [:email/id 3 :email/url]        "3@test.com",
+ [:car/id 2 :car/engine]         [:engine/id 2],
+ [:car/id 1 :car/engine]         [:engine/id 1],
+ [:provider/id 4 :provider/id]   4,
+ [:car/id 1 :car/id]             1,
+ [:accounts/id 3 :account/name]  "account-3",
+ [:provider/id 2 :provider/id]   2,
+ [:car/id 2 :car/model]          "car-2",
+ [:car/id 2 :car/id]             2,
+ [:person/id 3 :person/id]       3,
+ [:email/id 7 :email/url]        "7@test.com",
+ [:provider/id 1 :provider/name] "Google",
+ [:person/id 5 :person/accounts] [[:account/id 5]],
+ [:email/id 4 :email/id]         4,
+ [:person/id 8 :person/cars]     nil,
+ [:email/id 6 :email/id]         6,
+ [:email/id 7 :email/provider]   [:provider/id 2],
+ [:provider/id 3 :provider/id]   3,
+ [:engine/id 3 :engine/id]       3,
+ [:accounts/id 4 :account/id]    4,
+ [:car/id 4 :car/model]          "car-4",
+ [:email/id 3 :email/provider]   [:provider/id 3],
+ [:person/id 6 :person/email]    [:email/id 6],
+ [:person/id 3 :person/cars]     nil,
+ [:person/id 4 :person/spouse]   [:person/id 6],
+ [:person/id 4 :person/email]    [:email/id 4],
+ [:car/id 3 :car/model]          "car-3",
+ [:person/id 7 :person/spouse]   nil,
+ [:person/id 3 :person/spouse]   nil,
+ [:email/id 2 :email/url]        "2@test.com",
+ [:person/id 8 :person/name]     nil,
+ [:engine/id 1 :engine/id]       1,
+ [:person/id 4 :person/children] [:person/id 8],
+ [:person/id 5 :person/cars]     [[:car/id 4]],
+ [:person/id 6 :person/accounts] [[:account/id 6]],
+ [:person/id 5 :person/name]     "person-5",
+ [:accounts/id 1 :account/name]  "account-1",
+ [:email/id 5 :email/provider]   [:provider/id 2],
+ [:email/id 8 :email/id]         8,
+ [:email/id 2 :email/provider]   [:provider/id 1],
+ [:accounts/id 3 :account/id]    3,
+ [:person/id 8 :person/accounts] nil,
+ [:person/id 4 :person/id]       4,
+ [:person/id 5 :person/children] nil,
+ [:email/id 1 :email/url]        "1@test.com",
+ [:person/id 6 :person/children] [:person/id 7],
+ [:person/id 3 :person/email]    [:email/id 3],
+ [:email/id 3 :email/id]         3,
+ [:person/id 3 :person/children] nil,
+ [:person/id 8 :person/children] nil,
+ [:person/id 7 :person/children] nil,
+ [:car/id 4 :car/engine]         [:engine/id 2],
+ [:person/id 7 :person/id]       7,
+ [:email/id 7 :email/id]         7,
+ [:email/id 4 :email/provider]   [:provider/id 1],
+ [:person/id 4 :person/name]     "person-4",
+ [:email/id 8 :email/url]        "8@test.com",
+ [:person/id 4 :person/accounts] [[:account/id 4]],
+ [:accounts/id 2 :account/name]  "account-2",
+ [:person/id 6 :person/name]     "person-6",
+ [:accounts/id 5 :account/name]  "account-5",
+ [:email/id 6 :email/url]        "6@test.com",
+ [:car/id 3 :car/engine]         [:engine/id 3],
+ [:car/id 3 :car/id]             3,
+ [:email/id 4 :email/url]        "4@test.com",
+ [:accounts/id 2 :account/id]    2,
+ [:person/id 2 :person/children] [:person/id 3 :person/id 4 :person/id 5],
+ [:person/id 3 :person/name]     "person-3",
+ [:fastest-car]                  [:car/id 3],
+ [:email/id 1 :email/id]         1,
+ [:car/id 4 :car/id]             4,
+ [:engine/id 2 :engine/id]       2,
+ [:person/id 7 :person/email]    [:email/id 7],
+ [:car/id 5 :car/id]             5,
+ [:person/id 3 :person/accounts] nil,
+ [:person/id 5 :person/spouse]   nil,
+ [:engine/id 4 :engine/id]       4,
+ [:person/id 6 :person/spouse]   [:person/id 4],
+ [:person/id 2 :person/accounts] [[:account/id 3]],
+ [:person/id 8 :person/email]    [:email/id 8],
+ [:person/id 2 :person/cars]     [[:car/id 2]],
+ [:person/id 6 :person/id]       6,
+ [:provider/id 3 :provider/name] "Tencent",
+ [:accounts/id 6 :account/id]    6,
+ [:car/id 5 :car/model]          "car-5",
+ [:person/id 2 :person/spouse]   nil,
+ [:email/id 2 :email/id]         2,
+ [:engine/id 1 :engine/model]    "engine-1",
+ [:person/id 4 :person/cars]     [[:car/id 4]],
+ [:person/id 2 :person/name]     "person-2",
+ [:email/id 8 :email/provider]   [:provider/id 3],
+ [:email/id 1 :email/provider]   [:provider/id 1],
+ [:deceased]                     [[:person/id 8]],
+ [:car/id 5 :car/engine]         [:engine/id 4],
+ [:engine/id 2 :engine/model]    "engine-2",
+ [:person/id 7 :person/name]     "person-7",
+ [:accounts/id 6 :account/name]  "account-6",
+ [:person/id 2 :person/id]       2,
+ [:person/id 2 :person/email]    [:email/id 2],
+ [:accounts/id 7 :account/name]  "account-7",
+ [:person/id 5 :person/id]       5,
+ [:accounts/id 5 :account/id]    5,
+ [:person/id 8 :person/id]       8,
+ [:engine/id 4 :engine/model]    "engine-4",
+ [:provider/id 2 :provider/name] "Microsoft",
+ [:engine/id 3 :engine/model]    "engine-3",
+ [:email/id 5 :email/id]         5,
+ [:grandparents]                 [[:person/id 1] [:person/id 2]],
+ [:person/id 7 :person/accounts] [[:account/id 7]],
+ [:email/id 6 :email/provider]   [:provider/id 3],
+ [:person/id 5 :person/email]    [:email/id 5],
+ [:person/id 7 :person/cars]     [[:car/id 5]]}
