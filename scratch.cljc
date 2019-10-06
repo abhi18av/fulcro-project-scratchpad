@@ -282,69 +282,73 @@
                  m)
          (dissoc m k)))
 
-(defn vector-of-vectors? [a-value]
-      (if (and
-            (vector? a-value)
-            (every? vector? a-value))
-        true
-        false))
+(defn- nil-or-vector?
+  "Predicate to check wheter the argument is a `nil` of a single `vector` "
+  [a-value]
+  (or (nil? a-value)
+      (vector? a-value)))
 
-(defn nil-or-vector? [a-value] (or (nil? a-value))
-      (vector? a-value))
 
-(defn state-after-top-level-ident-dissoc [state-map ident]
-      (dissoc-in state-map ident))
+(defn- vector-of-vectors?
+  "Predicate to check whether the argument is a strictly vector of vectors"
+  [a-value]
+  (if (and
+       (vector? a-value)
+       (every? vector? a-value))
+    true
+    false))
 
-(defn all-paths-after-top-level-dissoc [state-map ident]
+
+(defn- state-after-top-level-ident-dissoc
+  "Returns the state map after top-level `dissoc` of the entity"
+  [state-map ident]
+  (dissoc-in state-map ident))
+
+(defn- all-paths-after-top-level-dissoc
+  "Returns a sequence of possible path vectors in the state-map"
+  [state-map ident]
   (paths (state-after-top-level-ident-dissoc state-map ident)))
 
 
-(all-paths-after-top-level-dissoc app-db [:person/id 1])
-
-
-(defn all-values-at-path-after-top-level-dissoc [state-map ident]
+(defn- all-values-at-path-after-top-level-dissoc
+  "Returns a sequence of all values corresponding to the path vectors in a state-map.
+  Contains the `nil` introduced for an `ident` by the `state-after-top-level-ident-dissoc`"
+  [state-map ident]
   (let [value-at-path (fn [a-path]
                         (if (>= (count a-path) 4)
                           ;; don't follow idents for denormalized paths
-                          (clojure.core/get-in (state-after-top-level-ident-dissoc state-map ident) a-path)
+                          (clojure.core/get-in (state-after-top-level-ident-dissoc state-map ident)
+                                               a-path)
                           ;; follow idents for denormalized paths
-                          (get-in (state-after-top-level-ident-dissoc state-map ident) a-path)))]
+                          (get-in (state-after-top-level-ident-dissoc state-map ident)
+                                  a-path)))]
        (map (fn [a-path]
                 (if (map? (value-at-path a-path))
                   ;; finds db-path from the original app-db
-                  (tree-path->db-path app-db a-path)
+                  (tree-path->db-path state-map a-path)
                   (value-at-path a-path)))
             (all-paths-after-top-level-dissoc state-map ident))))
 
-(all-values-at-path-after-top-level-dissoc app-db [:person/id 1])
 
-(defn entity-path-value-map-after-top-level-dissoc [state-map ident]
+(defn- entity-path-value-map-after-top-level-dissoc
+  "Returns a map of all path vectors and their corresponding values.
+  Contains the paths and their corresponding values (both normalized and denormalized).
+  The values contain the `nil` introduced for an `ident` by the `state-after-top-level-ident-dissoc`"
+  [state-map ident]
   (zipmap (all-paths-after-top-level-dissoc state-map ident)
           (all-values-at-path-after-top-level-dissoc state-map ident)))
 
-(entity-path-value-map-after-top-level-dissoc app-db [:person/id 1])
 
+(defn- prune-ident
+  "This is the reducing function used to prune the `nil` values which are the dangling pointers to
+  a an entity which is already removed."
+  [state-map [a-path a-value] ident]
+  (cond
+    (nil? a-value) (dissoc-in state-map a-path)
 
-(defn purge-ident
-       "Removes the dangling pointers to a `nil` caused by the removal of an ident
-                      at the toplevel. "
-       [state-map [a-path a-value] ident]
-       (cond
-              ;; nil => dissoc from map
-              (nil? a-value) (dissoc-in state-map a-path)
-              ;; to-many => update the path
-              vector-of-vectors? (assoc-in state-map a-path (apply vector (remove #{ident} a-value)))
-              ;;to-one => remove from the state-map
-              (vector? a-value) (if (= ident a-value)
-                                  (dissoc-in state-map a-path))))
-
-
-
-
-(reduce #(purge-ident %1 %2 [:person/id])
-        app-db
-        (entity-path-value-map-after-dissoc-and-denorm app-db [:person/id 1]))
-
+    (vector-of-vectors? a-value) (assoc-in state-map a-path
+                                           (apply vector (remove #{ident} a-value)))
+    :else state-map))
 
 
 
@@ -362,37 +366,27 @@
         [map? eql/ident? => map?]
         (remove-entity* state-map ident #{}))
 
-
        ;;TODO implement the cascading feature
-       ;; NOTE keywords in cascading should be uniquely owned
-
 
        ([state-map ident cascade]
         [map? eql/ident? (s/coll-of keyword? :kind set?) => map?]
-        (let [ident ident
-              cascade cascade
-              nil-or-vector? (fn [x] (or (nil? x)
-                                         (vector? x)))
-              state-after-ident-dissoc (-> state-map (dissoc-in ident))
-              all-paths-after-dissoc-and-denorm-keys (filter
-                                                       (fn [a-path]
-                                                           (if (< (count a-path) 4)
-                                                             true
-                                                             false))
-                                                       (paths state-after-ident-dissoc))
-              path-values-map (into {}
-                                    (filter #(nil-or-vector? (second %))
-                                            (zipmap
-                                              all-paths-after-dissoc-and-denorm-keys
-                                              (map #(get-in state-after-ident-dissoc %)
-                                                   all-paths-after-dissoc-and-denorm-keys))))]
-             (reduce #(purge-ident %1 %2 ident)
-                     state-after-ident-dissoc
-                     path-values-map))))
+
+        (reduce #(prune-ident %1 %2 ident)
+                (state-after-top-level-ident-dissoc app-db ident)
+                (entity-path-value-map-after-top-level-dissoc app-db ident))))
+
 
 (comment
 
   (remove-entity* app-db [:person/id 1])
+
+  (remove-entity* app-db [:car/id 1])
+
+  (remove-entity* app-db [:car/id 3])
+
+  (remove-entity* app-db [:car/id 4])
+
+
 
   (remove-entity* pruned-original-db [:person/id 1])
 
@@ -502,126 +496,3 @@
 
 
 ;;;;;;;;;;;;
-
-
-{[:accounts/id 1 :account/id]    1,
- [:car/id 1 :car/model]          "car-1",
- [:accounts/id 7 :account/id]    7,
- [:person/id 6 :person/cars]     [[:car/id 1] [:car/id 2]],
- [:provider/id 1 :provider/id]   1,
- [:provider/id 4 :provider/name] "Yahoo",
- [:person/id 8 :person/spouse]   nil,
- [:accounts/id 4 :account/name]  "account-4",
- [:email/id 5 :email/url]        "5@test.com",
- [:email/id 3 :email/url]        "3@test.com",
- [:car/id 2 :car/engine]         [:engine/id 2],
- [:car/id 1 :car/engine]         [:engine/id 1],
- [:provider/id 4 :provider/id]   4,
- [:car/id 1 :car/id]             1,
- [:accounts/id 3 :account/name]  "account-3",
- [:provider/id 2 :provider/id]   2,
- [:car/id 2 :car/model]          "car-2",
- [:car/id 2 :car/id]             2,
- [:person/id 3 :person/id]       3,
- [:email/id 7 :email/url]        "7@test.com",
- [:provider/id 1 :provider/name] "Google",
- [:person/id 5 :person/accounts] [[:account/id 5]],
- [:email/id 4 :email/id]         4,
- [:person/id 8 :person/cars]     nil,
- [:email/id 6 :email/id]         6,
- [:email/id 7 :email/provider]   [:provider/id 2],
- [:provider/id 3 :provider/id]   3,
- [:engine/id 3 :engine/id]       3,
- [:accounts/id 4 :account/id]    4,
- [:car/id 4 :car/model]          "car-4",
- [:email/id 3 :email/provider]   [:provider/id 3],
- [:person/id 6 :person/email]    [:email/id 6],
- [:person/id 3 :person/cars]     nil,
- [:person/id 4 :person/spouse]   [:person/id 6],
- [:person/id 4 :person/email]    [:email/id 4],
- [:car/id 3 :car/model]          "car-3",
- [:person/id 7 :person/spouse]   nil,
- [:person/id 3 :person/spouse]   nil,
- [:email/id 2 :email/url]        "2@test.com",
- [:person/id 8 :person/name]     nil,
- [:engine/id 1 :engine/id]       1,
- [:person/id 4 :person/children] [:person/id 8],
- [:person/id 5 :person/cars]     [[:car/id 4]],
- [:person/id 6 :person/accounts] [[:account/id 6]],
- [:person/id 5 :person/name]     "person-5",
- [:accounts/id 1 :account/name]  "account-1",
- [:email/id 5 :email/provider]   [:provider/id 2],
- [:email/id 8 :email/id]         8,
- [:email/id 2 :email/provider]   [:provider/id 1],
- [:accounts/id 3 :account/id]    3,
- [:person/id 8 :person/accounts] nil,
- [:person/id 4 :person/id]       4,
- [:person/id 5 :person/children] nil,
- [:email/id 1 :email/url]        "1@test.com",
- [:person/id 6 :person/children] [:person/id 7],
- [:person/id 3 :person/email]    [:email/id 3],
- [:email/id 3 :email/id]         3,
- [:person/id 3 :person/children] nil,
- [:person/id 8 :person/children] nil,
- [:person/id 7 :person/children] nil,
- [:car/id 4 :car/engine]         [:engine/id 2],
- [:person/id 7 :person/id]       7,
- [:email/id 7 :email/id]         7,
- [:email/id 4 :email/provider]   [:provider/id 1],
- [:person/id 4 :person/name]     "person-4",
- [:email/id 8 :email/url]        "8@test.com",
- [:person/id 4 :person/accounts] [[:account/id 4]],
- [:accounts/id 2 :account/name]  "account-2",
- [:person/id 6 :person/name]     "person-6",
- [:accounts/id 5 :account/name]  "account-5",
- [:email/id 6 :email/url]        "6@test.com",
- [:car/id 3 :car/engine]         [:engine/id 3],
- [:car/id 3 :car/id]             3,
- [:email/id 4 :email/url]        "4@test.com",
- [:accounts/id 2 :account/id]    2,
- [:person/id 2 :person/children] [:person/id 3 :person/id 4 :person/id 5],
- [:person/id 3 :person/name]     "person-3",
- [:fastest-car]                  [:car/id 3],
- [:email/id 1 :email/id]         1,
- [:car/id 4 :car/id]             4,
- [:engine/id 2 :engine/id]       2,
- [:person/id 7 :person/email]    [:email/id 7],
- [:car/id 5 :car/id]             5,
- [:person/id 3 :person/accounts] nil,
- [:person/id 5 :person/spouse]   nil,
- [:engine/id 4 :engine/id]       4,
- [:person/id 6 :person/spouse]   [:person/id 4],
- [:person/id 2 :person/accounts] [[:account/id 3]],
- [:person/id 8 :person/email]    [:email/id 8],
- [:person/id 2 :person/cars]     [[:car/id 2]],
- [:person/id 6 :person/id]       6,
- [:provider/id 3 :provider/name] "Tencent",
- [:accounts/id 6 :account/id]    6,
- [:car/id 5 :car/model]          "car-5",
- [:person/id 2 :person/spouse]   nil,
- [:email/id 2 :email/id]         2,
- [:engine/id 1 :engine/model]    "engine-1",
- [:person/id 4 :person/cars]     [[:car/id 4]],
- [:person/id 2 :person/name]     "person-2",
- [:email/id 8 :email/provider]   [:provider/id 3],
- [:email/id 1 :email/provider]   [:provider/id 1],
- [:deceased]                     [[:person/id 8]],
- [:car/id 5 :car/engine]         [:engine/id 4],
- [:engine/id 2 :engine/model]    "engine-2",
- [:person/id 7 :person/name]     "person-7",
- [:accounts/id 6 :account/name]  "account-6",
- [:person/id 2 :person/id]       2,
- [:person/id 2 :person/email]    [:email/id 2],
- [:accounts/id 7 :account/name]  "account-7",
- [:person/id 5 :person/id]       5,
- [:accounts/id 5 :account/id]    5,
- [:person/id 8 :person/id]       8,
- [:engine/id 4 :engine/model]    "engine-4",
- [:provider/id 2 :provider/name] "Microsoft",
- [:engine/id 3 :engine/model]    "engine-3",
- [:email/id 5 :email/id]         5,
- [:grandparents]                 [[:person/id 1] [:person/id 2]],
- [:person/id 7 :person/accounts] [[:account/id 7]],
- [:email/id 6 :email/provider]   [:provider/id 3],
- [:person/id 5 :person/email]    [:email/id 5],
- [:person/id 7 :person/cars]     [[:car/id 5]]}
