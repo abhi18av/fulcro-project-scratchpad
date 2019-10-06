@@ -295,29 +295,34 @@
 (defn state-after-top-level-ident-dissoc [state-map ident]
       (dissoc-in state-map ident))
 
-(defn all-paths-after-dissoc-and-denorm-keys [state-map ident]
-  (let [is-denorm-path? (fn [a-path]
-                           (if (< (count a-path) 4)
-                             true
-                             false))]
-      (filter is-denorm-path?
-              (paths (state-after-top-level-ident-dissoc state-map ident)))))
+(defn all-paths-after-top-level-dissoc [state-map ident]
+  (paths (state-after-top-level-ident-dissoc state-map ident)))
 
 
-(defn all-values-at-path-after-dissoc-and-denorm-keys [state-map ident]
-      (let [value-at-path (fn [a-path]
-                              (get-in (state-after-top-level-ident-dissoc state-map ident) a-path))]
-           (map (fn [a-path]
-                    (if (map? (value-at-path a-path))
-                      ;; finds db-path from the original app-db
-                      (tree-path->db-path app-db a-path)
-                      (value-at-path a-path)))
-                (all-paths-after-dissoc-and-denorm-keys state-map ident))))
+(all-paths-after-top-level-dissoc app-db [:person/id 1])
 
-(defn entity-path-value-map-after-dissoc-and-denorm [state-map ident]
-  (zipmap (all-paths-after-dissoc-and-denorm-keys state-map ident)
-          (all-values-at-path-after-dissoc-and-denorm-keys state-map ident)))
 
+(defn all-values-at-path-after-top-level-dissoc [state-map ident]
+  (let [value-at-path (fn [a-path]
+                        (if (>= (count a-path) 4)
+                          ;; don't follow idents for denormalized paths
+                          (clojure.core/get-in (state-after-top-level-ident-dissoc state-map ident) a-path)
+                          ;; follow idents for denormalized paths
+                          (get-in (state-after-top-level-ident-dissoc state-map ident) a-path)))]
+       (map (fn [a-path]
+                (if (map? (value-at-path a-path))
+                  ;; finds db-path from the original app-db
+                  (tree-path->db-path app-db a-path)
+                  (value-at-path a-path)))
+            (all-paths-after-top-level-dissoc state-map ident))))
+
+(all-values-at-path-after-top-level-dissoc app-db [:person/id 1])
+
+(defn entity-path-value-map-after-top-level-dissoc [state-map ident]
+  (zipmap (all-paths-after-top-level-dissoc state-map ident)
+          (all-values-at-path-after-top-level-dissoc state-map ident)))
+
+(entity-path-value-map-after-top-level-dissoc app-db [:person/id 1])
 
 
 (defn purge-ident
