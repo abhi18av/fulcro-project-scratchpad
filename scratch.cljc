@@ -3,7 +3,6 @@
   #?(:cljs (:require-macros com.fulcrologic.fulcro.algorithms.normalized-state-helpers))
   (:refer-clojure :exclude [get-in])
   (:require
-    [clojure.walk :as walk]
     [com.fulcrologic.fulcro.components :as comp :refer [defsc]]
     #?(:clj  [com.fulcrologic.fulcro.dom-server :as dom]
        :cljs [com.fulcrologic.fulcro.dom :as dom])
@@ -15,13 +14,7 @@
     [com.fulcrologic.fulcro.algorithms.merge :as merge]
     [com.fulcrologic.fulcro.components :as comp]))
 
-
-;;============================================================================
-
-(def denorm-data {:a [[:b 1]] :b [:b 1]})
-
-
-(def app-db {:denorm       {:level-1 {:level-2 denorm-data}}
+(def app-db {:denorm       {:level-1 {:level-2 {:a [[:b 1]] :b [:b 1]}}}
              ;; All people with relationship to other people as children and spouses
              :person/id    {1 {:person/id       1
                                :person/name     "person-1"
@@ -249,6 +242,14 @@
   '())
 
 
+
+
+
+
+
+
+;;============================================================================
+
 ;;============================================================================
 
 ;; helper
@@ -269,8 +270,8 @@
 
 (defn- dissoc-in
        "Dissociates an entry from a nested associative structure returning a new
-                      nested structure. keys is a sequence of keys. Any empty maps that result
-                      will not be present in the new structure."
+                  nested structure. keys is a sequence of keys. Any empty maps that result
+                  will not be present in the new structure."
        [m [k & ks :as keys]]
        (if ks
          (if-let [nextmap (get m k)]
@@ -280,17 +281,6 @@
                         (dissoc m k)))
                  m)
          (dissoc m k)))
-
-
-(def denorm-data {:a [[:b 1]] :b [:b 1]})
-
-(def original-state
-  {:a      [:b 1]
-   :top-tm [[:d 1] [:b 1]]
-   :denorm {:level-1 {:level-2 denorm-data}}
-   :b      {1 {:c [:d 1]
-               :e [[:b 1] [:d 1]]}}
-   :d      {1 {:value 42}}})
 
 (defn vector-of-vectors? [a-value]
       (if (and
@@ -302,50 +292,57 @@
 (defn nil-or-vector? [a-value] (or (nil? a-value))
       (vector? a-value))
 
-(defn state-after-top-level-ident-dissoc [ident]
-      (-> app-db (dissoc-in ident)))
+(defn state-after-top-level-ident-dissoc [state-map ident]
+      (dissoc-in state-map ident))
+
+(defn all-paths-after-dissoc-and-denorm-keys [state-map ident]
+  (let [is-denorm-path? (fn [a-path]
+                           (if (< (count a-path) 4)
+                             true
+                             false))]
+      (filter is-denorm-path?
+              (paths (state-after-top-level-ident-dissoc state-map ident)))))
 
 
-(defn all-paths-after-dissoc-and-denorm-keys
-      [ident]
-      (filter
-        (fn [a-path]
-            (if (< (count a-path) 4)
-              true
-              false))
-        (paths (state-after-top-level-ident-dissoc ident))))
+(defn all-values-at-path-after-dissoc-and-denorm-keys [state-map ident]
+      (let [value-at-path (fn [a-path]
+                              (get-in (state-after-top-level-ident-dissoc state-map ident) a-path))]
+           (map (fn [a-path]
+                    (if (map? (value-at-path a-path))
+                      ;; finds db-path from the original app-db
+                      (tree-path->db-path app-db a-path)
+                      (value-at-path a-path)))
+                (all-paths-after-dissoc-and-denorm-keys state-map ident))))
+
+(defn entity-path-value-map-after-dissoc-and-denorm [state-map ident]
+  (zipmap (all-paths-after-dissoc-and-denorm-keys state-map ident)
+          (all-values-at-path-after-dissoc-and-denorm-keys state-map ident)))
 
 
 
-
-(defn entity-path-value-map-after-dissoc [a-path ident]
-      (let [value-at-path (get-in (state-after-top-level-ident-dissoc ident) a-path)]
-           (if (map? value-at-path)
-             (tree-path->db-path app-db a-path)
-             value-at-path)))
-
-
-
-
-;; FIXME should also prune nils
-
-(defn- purge-ident
+(defn purge-ident
        "Removes the dangling pointers to a `nil` caused by the removal of an ident
-            at the toplevel. "
+                      at the toplevel. "
        [state-map [a-path a-value] ident]
-       (let [vector-of-vectors? (if (and
-                                      (vector? a-value)
-                                      (every? vector? a-value))
-                                  true
-                                  false)]
-            (cond
+       (cond
               ;; nil => dissoc from map
               (nil? a-value) (dissoc-in state-map a-path)
               ;; to-many => update the path
               vector-of-vectors? (assoc-in state-map a-path (apply vector (remove #{ident} a-value)))
               ;;to-one => remove from the state-map
               (vector? a-value) (if (= ident a-value)
-                                  (dissoc-in state-map a-path)))))
+                                  (dissoc-in state-map a-path))))
+
+
+
+
+(reduce #(purge-ident %1 %2 [:person/id])
+        app-db
+        (entity-path-value-map-after-dissoc-and-denorm app-db [:person/id 1]))
+
+
+
+
 
 (>defn remove-entity*
        "Remove the given entity at the given ident. Also scans all tables and removes any to-one or to-many idents that are
@@ -390,15 +387,14 @@
 
 (comment
 
+  (remove-entity* app-db [:person/id 1])
+
+  (remove-entity* pruned-original-db [:person/id 1])
 
   ;;;;;;
 
   ;; NOTE path-db after dissoc and denorm
-  (let [ident [:person/id 1]]
-       (zipmap
-         (all-paths-after-dissoc-and-denorm-keys ident)
-         (map #(entity-path-value-map-after-dissoc % ident)
-              (all-paths-after-dissoc-and-denorm-keys ident))))
+
 
   ;;;;;;
 
@@ -425,42 +421,36 @@
 (def all-paths-original-data
   (paths app-db))
 
-
-
 (defn entity-path-value-map-original-data [a-path]
-  (let [value-at-path (get-in app-db a-path)]
-    (if (map? value-at-path)
-      (tree-path->db-path app-db a-path)
-      value-at-path)))
+      (let [value-at-path (get-in app-db a-path)]
+           (if (map? value-at-path)
+             (tree-path->db-path app-db a-path)
+             value-at-path)))
 
 
 ;; NOTE path-db original data
+
+
 (def paths-db-original-data
   (zipmap
-   all-paths-original-data
-   (map #(entity-path-value-map-original-data %)
-        all-paths-original-data)))
+    all-paths-original-data
+    (map #(entity-path-value-map-original-data %)
+         all-paths-original-data)))
 
 ;; TODO a function to re-create the original db without the nil values
 
 
 (defn prune-nils [app-db [a-path a-value]]
-  (cond
-    (nil? a-value) (dissoc-in app-db a-path)
-    :else app-db))
-
+      (cond
+        (nil? a-value) (dissoc-in app-db a-path)
+        :else app-db))
 
 (def nil-pruned-original-db
   (reduce prune-nils
           app-db
           paths-db-original-data))
 
-
-
-
 (comment
-
-
 
   {:fastest-car [:car/id 1]
    :car/id      {1 {:car/engine [:engine/id 1]}}
@@ -473,16 +463,40 @@
   (remove-edge* state [:engine/id 1])
   (remove-edge* state [:engine/id])
 
+  (let [state {:fastest-car  [:car/id 1]
+               :car/id       {1 {:car/engine [:engine/id 1]}}
+               :engine/id    {1 {:engine/id 1}}
+               :engine/model "engine-1"}]
+       (-> state
+           (dissoc-in [:fastest-car])
+           (get-in [:fastest-car])))
 
+  (remove-entity* pruned-original-db [:person/id 1])
 
+  (let [state {:a [:b 1]
+               :b {1 {:c [:d 1]}}
+               :d {1 {:value  42
+                      :other  [:e 2]
+                      :keeper [:e 3]}}
+               :e {2 {:x 1}
+                   3 {:y 1}}}]
 
+       (assertions
+         "Can cascade a delete across named edge, removing the ident on the :other edge from it's own table"
+         (-> (nsh/remove-edge* state [:b 1 :c] #{:other})
+             (get-in [:e 2])
+             nil?) => true)
+
+       (assertions
+         "Can cascade a delete across named edges, leaving the ident on the :keeper edge it's in own table"
+         (-> (nsh/remove-edge* state [:b 1 :c] #{:other})
+             (get-in [:e 3])) => {:y 1}))
 
   '())
 
 
 
 ;;;;;;;;;;;;
-
 
 
 {[:accounts/id 1 :account/id]    1,
