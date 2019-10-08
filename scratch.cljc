@@ -138,47 +138,102 @@
 
 ;;;;;;;;;;;;;
 
-
-
-(defn- cascade-delete*
-  [state-map starting-entity cascade]
-  (reduce
-   (fn [s edge]
-     (if (every? eql/ident? edge)
-       (reduce (fn [s2 ident] (remove-entity* s2 ident cascade)) s edge)
-       (remove-entity* s edge cascade)))
-   state-map
-   (set/intersection (set cascade) (set (keys starting-entity)))))
-
-
-
-(let [denorm-data {:a [[:person/id 1] [:person/id 2]] :b [:person/id 1]}
-      state {:fastest-car  [:car/id 1]
-             :grandparents [[:person/id 1] [:person/id 2]]
-             :denorm       {:level-1 {:level-2 denorm-data}}
-             :person/id    {1 {:person/name  "person-1"
-                               :person/cars  [[:car/id 1] [:car/id 2]]
-                               :person/email [:email/id 1]}
-                            2 {:person/name  "person-2"
-                               :person/cars  [[:car/id 1]]
-                               :person/email [:email/id 2]}}
-             :car/id       {1 {:car/model "model-1"}
-                            2 {:car/model "model-2"}}
-             :email/id     {1 {:email/provider "Google"}
-                            2 {:email/provider "Microsoft"}}}]
-  (cascade-delete* state (get-in state [:person/id 1]) #{:person/cars}))
+(defn- paths
+  "Walks the tree in a depth first manner and returns the possible paths"
+  [m]
+  (letfn [(paths* [ps ks m]
+            (reduce-kv
+             (fn [ps k v]
+               (if (map? v)
+                 (paths* ps (conj ks k) v)
+                 (conj ps (conj ks k))))
+             ps
+             m))]
+    (paths* () [] m)))
 
 
 
+(def state-map {:fastest-car  [:car/id 1]
+                  :grandparents [[:person/id 1] [:person/id 2]]
+                  :denorm       {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]] :b [:person/id 1]}}}
+                  :person/id    {1 {:person/name  "person-1"
+                                    :person/cars  [[:car/id 1] [:car/id 2]]
+                                    :person/email [:email/id 1]}
+                                 2 {:person/name  "person-2"
+                                    :person/cars  [[:car/id 1]]
+                                    :person/email [:email/id 2]}}
+                  :car/id       {1 {:car/model "model-1"}
+                                 2 {:car/model "model-2"}}
+                  :email/id     {1 {:email/provider "Google"}
+                                 2 {:email/provider "Microsoft"}}})
 
-(assertions
- "Removes top-level to-one references"
- (-> (nsh/remove-entity* state [:car/id 1] #{}) :fastest-car nil?) => true
- "Removes top-level to-many refs"
- (-> (nsh/remove-entity* state [:person/id 1] #{}) :grandparents) => [[:person/id 2]]
- "Ignores denormalized data"
- (-> (nsh/remove-entity* state [:person/id 1] #{}) (get-in [:denorm :level-1 :level-2])) => denorm-data
- "Removes table-nested to-one references"
- (-> (nsh/remove-entity* state [:email/id 1] #{}) (get-in [:person/id 1 :person/email]) nil?) => true
- "Removes table-nested to-many refs"
- (-> (nsh/remove-entity* state [:car/id 1] #{}) (get-in [:person/id 1 :person/cars])) => [[:car/id 2]])
+(def tables (keep (fn [k]
+                      (let [candidate (get state-map k)]
+                        (when (and (map? candidate) (every? map? (vals candidate)))
+                          k))) (keys state-map)))
+
+(defn remove-idents-at-path [state-map path ident]
+    (let [v (clojure.core/get-in state-map path)]
+      (cond
+        (= v ident) (dissoc-in state-map path)
+        (every? eql/ident? v) (merge/remove-ident* state-map ident path)
+        :else state-map)))
+
+(remove-idents-at-path state-map [:person/id 1 :person/cars] [:car/id 2])
+
+(remove-idents-at-path state-map [:person/id 1 :person/email] [:email/id 1])
+
+
+
+(let [top-key :person/id]
+    (map (fn [k]
+           (if top-key
+             [top-key k]
+             [k]))
+         (keys (get state-map top-key))))
+
+
+(defn candidate-paths [state-map top-key]                 ; allow top-key to be nil to "mean" root node
+    (map (fn [k]
+           (if top-key
+             [top-key k]
+             [k]))
+         (keys (get state-map top-key))))
+
+
+
+
+(candidate-paths state-map :person/id)
+(candidate-paths state-map :car/id)
+(candidate-paths state-map nil)
+
+
+(paths state-map)
+
+
+(defn remove-ident-from-table [state-map ident]
+    (reduce
+      #(remove-idents-at-path %1 %2 ident)
+      state-map
+      (paths state-map)
+      #_(candidate-paths state-map table)))
+
+(remove-ident-from-table state-map [:person/id 1])
+(remove-ident-from-table state-map [:car/id 1])
+
+
+(reduce remove-ident-from-table
+          state-map
+          nil
+          #_tables)
+
+
+(def state-without-entity (->
+                              ;; remove the table-nested pointers to the entity
+                              (reduce remove-ident-from-table
+                                      state-map
+                                      tables)
+                              ;; remove the top-level edges that point to the entity
+                              (remove-ident-from-table nil)
+                              ;; remove the entity
+                              (dissoc-in ident)))
