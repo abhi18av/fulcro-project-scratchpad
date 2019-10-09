@@ -135,9 +135,10 @@
 
              final-state (reduce
                           (fn [s edge]
-                            (if (every? eql/ident? edge)
-                              (reduce (fn [s2 ident] (remove-entity* s2 ident cascade)) s edge)
-                              (remove-entity* s edge cascade)))
+                            (cond
+                              (every? eql/ident? edge) (reduce (fn [s2 ident] (remove-entity* s2 ident cascade)) s edge)
+                              (eql/ident? edge)  (remove-entity* s edge cascade)
+                              :else s))
                           state-without-entity
                           (map
                            (fn [x] (clojure.core/get-in state1 (conj [:person/id (:person/id target-entity)] x))) ;; FIXME remove the hardwiring
@@ -175,55 +176,151 @@
 (remove-entity* state1 [:car/id 1] #{})
 
 
-;; behavior-2
+;;;;;;;;;;;;;
+;;;;;;;;;;;;;
+;;;;;;;;;;;;;
 
 
-(def state2 {:person/id {1 {:person/id 1
-                            :person/spouse   [:person/id 2]
-                            :person/email    [:email/id 1]
-                            :person/cars     [[:car/id 1]
-                                              [:car/id 2]]
-                            :person/children [[:person/id 3]]}
-                         2 {:person/id 2
-                            :person/spouse   [:person/id 1]
-                            :person/children [[:person/id 3]]}
-                         3 {:person/id 3}}
-             :car/id    {1 {:car/id 1
-                            :car/model "model-1"}
-                         2 {:car/id 2
-                            :car/model "model-2"}}
-             :engine/id {1 {:engine/id 1
-                            :engine/name "engine-1"}}
-             :email/id  {1 {:email/id 1
-                            :email/provider "Google"}}})
+(def state {:fastest-car  [:car/id 1]
+            :grandparents [[:person/id 1] [:person/id 2]]
+            :denorm       {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]]
+                                               :b [:person/id 1]}}}
+            :person/id    {1 {:person/id       1
+                              :person/spouse   [:person/id 2]
+                              :person/email    [:email/id 1]
+                              :person/cars     [[:car/id 1]
+                                                [:car/id 2]]
+                              :person/children [[:person/id 3]]}
+                           2 {:person/id       2
+                              :person/spouse   [:person/id 1]
+                              :person/children [[:person/id 3]]}
+                           3 {:person/id 3}}
+            :car/id       {1 {:car/id    1
+                              :car/model "model-1"}
+                           2 {:car/id    2
+                              :car/model "model-2"}}
+            :engine/id    {1 {:engine/id   1
+                              :engine/name "engine-1"}}
+            :email/id     {1 {:email/id       1
+                              :email/provider "Google"}}})
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn tables [state-map]
+  (keep (fn [k]
+          (let [candidate (get state-map k)]
+            (when (and (map? candidate) (every? map? (vals candidate)))
+              k))) (keys state-map)))
+
+(tables state)
 
 
-;;"Removes a single, to-one and non-recursive cascased entity"
-(remove-entity* state2 [:person/id 1] #{:person/email})
-
-;;"Removes a single, to-many and non-recursive cascased entity"
-(remove-entity* state2 [:person/id 1] #{:person/cars})
-
-;;"Removes multiple, to-one and non-recursive cascased entity"
-(remove-entity* state2 [:person/id 1] #{:person/email :person/cars})
+(defn non-tables [state-map]
+  (keep (fn [k]
+          (let [candidate (get state-map k)]
+            (when (vector? candidate)
+              [k])))
+        (keys state-map)))
 
 
-;;;;;;;;;;;;;;;
+(non-tables state)
 
 
-(let [state-map state2
-      starting-entity  (get-in state-map [:person/id 1])
-      cascade  #{:person/email :person/cars}]
+(defn remove-idents-at-path [state1 ident path]
+  (let [v (clojure.core/get-in state1 path)]
+    (cond
+      (int? v) state1
+      (= v ident) (dissoc-in state1 path)
+      (every? eql/ident? v) (merge/remove-ident* state1 ident path)
+      :else state1)))
+
+
+(remove-idents-at-path state [:car/id 1] [:person/id 1 :person/cars])
+
+(remove-idents-at-path state [:person/id 1] [:grandparents])
+
+
+(defn candidate-paths [state1 table-name]
+  (filter (fn [a-path]
+            (= table-name (first a-path)))
+          (normalized-paths state1)))
+
+(candidate-paths state :person/id)
+(candidate-paths state :denorm)
+(candidate-paths state :grandparents)
+
+
+(defn remove-ident-from-table [state1 ident table]
+  (reduce
+    #(remove-idents-at-path %1 ident %2)
+    state1
+    (concat (candidate-paths state1 :person/id) (non-tables state1))))
+
+
+
+(remove-ident-from-table state [:person/id 1] :person/id)
+
+(remove-ident-from-table state [:person/id 1] :grandparents)
+
+
+
+(defn state-without-entity [state1 ident]
+  (->
+    ;; remove the (non) table-nested pointers to the entity
+    (reduce #(remove-ident-from-table %1 ident %2)
+            state1
+            (tables state1))
+    ;; remove the top-level entity
+    (dissoc-in ident)))
+
+(state-without-entity state [:person/id 1])
+
+(defn target-entity [state1 ident]
+  (get-in state1 ident))
+
+
+(target-entity state [:person/id 1])
+
+
+(defn cascaded-idents [original-state target-entity cascade]
   (map
-   (fn [x] (clojure.core/get-in state-map (conj [:person/id (:person/id starting-entity)] x)))
-   (set/intersection
-    cascade
-    (set (keys starting-entity)))))
+    (fn [x] (clojure.core/get-in original-state
+                                 (conj [:person/id (:person/id target-entity)] x)))
+    (set/intersection
+      cascade
+      (set (keys target-entity)))))
+
+(cascaded-idents state
+                (target-entity state [:person/id 1])
+                #{:person/email})
+
+(cascaded-idents state
+                 (target-entity state [:person/id 1])
+                 #{:person/email :person/cars})
+
+(defn final-state [original-state state-without-entity ident cascade]
+  (reduce
+    (fn [s edge]
+      (if (every? eql/ident? edge)
+        (reduce (fn [s2 ident] (remove-entity* s2 ident cascade)) s edge)
+        (remove-entity* s edge cascade)))
+    state-without-entity
+    (cascaded-idents state
+                     (target-entity state ident)
+                     cascade)))
 
 
 
-(:person/id
- (get-in state2 [:person/id 1]))
+(final-state
+  state
+  (state-without-entity state [:person/id 1])
+  [:person/id 1]
+  #{})
 
 
+(final-state
+  state
+  (state-without-entity state [:person/id 1])
+  [:person/id 1]
+  #{:person/email :person/cars})
 
