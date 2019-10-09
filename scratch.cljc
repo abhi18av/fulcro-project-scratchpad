@@ -55,23 +55,20 @@
 
 (>defn get-in
        "Just like clojure.core/get-in, but if an element of the path is an ident it will follow the ident instead."
-       ([state-map path]
+       ([state1 path]
         [map? vector? => any?]
-        (get-in state-map path nil))
-       ([state-map path not-found]
+        (get-in state1 path nil))
+       ([state1 path not-found]
         [map? vector? any? => any?]
-        (clojure.core/get-in state-map (tree-path->db-path state-map path) not-found)))
-
+        (clojure.core/get-in state1 (tree-path->db-path state1 path) not-found)))
 
 ;;============================================================================
-
-;; helper
 
 
 (defn- dissoc-in
   "Dissociates an entry from a nested associative structure returning a new
-                  nested structure. keys is a sequence of keys. Any empty maps that result
-                  will not be present in the new structure."
+             nested structure. keys is a sequence of keys. Any empty maps that result
+             will not be present in the new structure."
   [m [k & ks :as keys]]
   (if ks
     (if-let [nextmap (get m k)]
@@ -82,64 +79,8 @@
       m)
     (dissoc m k)))
 
-
-;;============================================================================
-
-
-(declare remove-entity*)
-
-(defn- cascade-delete*
-  [state-map starting-entity cascade]
-  (reduce
-   (fn [s edge]
-     (if (every? eql/ident? edge)
-       (reduce (fn [s2 ident] (remove-entity* s2 ident cascade)) s edge)
-       (remove-entity* s edge cascade)))
-   state-map
-   (set/intersection (set cascade) (set (keys starting-entity)))))
-
-
-(>defn remove-entity*
-       [state-map ident cascade]
-       [map? eql/ident? (s/coll-of keyword? :kind set?) => map?]
-       (let [tables                  (keep (fn [k]
-                                             (let [candidate (get state-map k)]
-                                               (when (and (map? candidate) (every? map? (vals candidate)))
-                                                 k))) (keys state-map))
-             remove-idents-at-path   (fn [state-map path]
-                                       (let [v (clojure.core/get-in state-map path)]
-                                         (cond
-                                           (= v ident) (dissoc-in state-map path)
-                                           (every? eql/ident? v) (merge/remove-ident* state-map ident path)
-                                           :else state-map)))
-             candidate-paths         (fn [state-map top-key]     ; allow top-key to be nil to "mean" root node
-                                       (map (fn [k]
-                                              (if top-key
-                                                [top-key k]
-                                                [k]))
-                                            (keys (get state-map top-key))))
-             remove-ident-from-table (fn [state-map table]
-                                       (reduce
-                                        remove-idents-at-path
-                                        state-map
-                                        (candidate-paths state-map table)))
-             state-without-entity    (->
-                                  ;; remove the pointers to the entity
-                                      (reduce remove-ident-from-table state-map tables)
-                                  ;; remove the top-level edges that point to the entity
-                                      (remove-ident-from-table nil)
-                                  ;; remove the entity
-                                      (dissoc-in ident))
-             target-entity           (get-in state-map ident)
-             final-state             (cascade-delete* state-without-entity target-entity cascade)]
-         final-state))
-
-
-
-;;;;;;;;;;;;;
-
-(defn- paths
-  "Walks the tree in a depth first manner and returns the possible paths"
+(defn- normalized-paths
+  "Walks the tree in a depth first manner and returns the normalized possible paths"
   [m]
   (letfn [(paths* [ps ks m]
             (reduce-kv
@@ -149,91 +90,126 @@
                  (conj ps (conj ks k))))
              ps
              m))]
-    (paths* () [] m)))
+    (filter #(< (count %) 4)
+            (paths* () [] m))))
+
+(declare remove-entity*)
+
+(defn- cascade-delete*
+  [state1 starting-entity cascade]
+  (reduce
+   (fn [s edge]
+     (if (every? eql/ident? edge)
+       (reduce (fn [s2 ident] (remove-entity* s2 ident cascade)) s edge)
+       (remove-entity* s edge cascade)))
+   state1
+    ;; FIXME this must return an ident or vec of idents
+   (set/intersection (set cascade) (set (keys starting-entity)))))
+
+(>defn remove-entity*
+       [state1 ident cascade]
+       [map? eql/ident? (s/coll-of keyword? :kind set?) => map?]
+       (let [tables (keep (fn [k]
+                            (let [candidate (get state1 k)]
+                              (when (and (map? candidate) (every? map? (vals candidate)))
+                                k))) (keys state1))
+
+             non-tables (keep (fn [k]
+                                (let [candidate (get state1 k)]
+                                  (when (vector? candidate)
+                                    [k])))
+                              (keys state1))
+             remove-idents-at-path (fn [state1 path]
+                                     (let [v (clojure.core/get-in state1 path)]
+                                       (cond
+                                         (= v ident) (dissoc-in state1 path)
+                                         (every? eql/ident? v) (merge/remove-ident* state1 ident path)
+                                         :else state1)))
+
+             candidate-paths (fn [state1 table-name]
+                               (filter (fn [a-path]
+                                         (= table-name (first a-path)))
+                                       (normalized-paths state1)))
+
+             remove-ident-from-table (fn [state1 table]
+                                       (reduce
+                                        remove-idents-at-path
+                                        state1
+                                        (concat (candidate-paths state1 :person/id) non-tables)))
+
+             state-without-entity (->
+                               ;; remove the (non) table-nested pointers to the entity
+                                   (reduce remove-ident-from-table
+                                           state1
+                                           tables)
+                               ;; remove the top-level entity
+                                   (dissoc-in ident))
+             target-entity (clojure.core/get-in state1 ident)
+             final-state (cascade-delete* state-without-entity target-entity cascade)]
+         final-state))
+
+
+;;;;;;;;;;;;;
+
+
+(def state1 {:fastest-car  [:car/id 1]
+            :grandparents [[:person/id 1] [:person/id 2]]
+            :denorm       {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]]
+                                               :b [:person/id 1]}}}
+            :person/id    {1 {:person/name  "person-1"
+                              :person/cars  [[:car/id 1] [:car/id 2]]
+                              :person/email [:email/id 1]}
+                           2 {:person/name  "person-2"
+                              :person/cars  [[:car/id 1]]
+                              :person/email [:email/id 2]}}
+            :car/id       {1 {:car/model "model-1"}
+                           2 {:car/model "model-2"}}
+            :email/id     {1 {:email/provider "Google"}
+                           2 {:email/provider "Microsoft"}}})
+
+;; behavior-1
+(remove-entity* state1 [:person/id 1] #{})
+
+(remove-entity* state1 [:car/id 1] #{})
+
+(remove-entity* state1 [:person/id 1] #{})
+
+(remove-entity* state1 [:person/id 1] #{})
+
+(remove-entity* state1 [:email/id 1] #{})
+
+(remove-entity* state1 [:car/id 1] #{})
+
+
+;; behavior-2
+
+
+(def state2 {:person/id {1 {:person/name     "person-1"}
+                          :person/spouse   [:person/id 2]
+                          :person/email    [:email/id 1]
+                          :person/cars     [[:car/id 1]
+                                            [:car/id 2]]
+                          :person/children [[:person/id 3]]
+                          2 {:person/name     "person-2"
+                             :person/spouse   [:person/id 1]
+                             :person/children [[:person/id 3]]}
+                          3 {:person/name "person-3"}}
+             :car/id    {1 {:car/model "model-1"}
+                         2 {:car/model "model-2"}}
+             :engine/id {1 {:engine/name "engine-1"}}
+             :email/id  {1 {:email/provider "Google"}}})
 
 
 
-(def state-map {:fastest-car  [:car/id 1]
-                  :grandparents [[:person/id 1] [:person/id 2]]
-                  :denorm       {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]] :b [:person/id 1]}}}
-                  :person/id    {1 {:person/name  "person-1"
-                                    :person/cars  [[:car/id 1] [:car/id 2]]
-                                    :person/email [:email/id 1]}
-                                 2 {:person/name  "person-2"
-                                    :person/cars  [[:car/id 1]]
-                                    :person/email [:email/id 2]}}
-                  :car/id       {1 {:car/model "model-1"}
-                                 2 {:car/model "model-2"}}
-                  :email/id     {1 {:email/provider "Google"}
-                                 2 {:email/provider "Microsoft"}}})
 
-(def tables (keep (fn [k]
-                      (let [candidate (get state-map k)]
-                        (when (and (map? candidate) (every? map? (vals candidate)))
-                          k))) (keys state-map)))
+;;"Removes a single, to-one and non-recursive cascased entity"
+(remove-entity* state2 [:person/id 1] #{:person/email})
 
-(defn remove-idents-at-path [state-map path ident]
-    (let [v (clojure.core/get-in state-map path)]
-      (cond
-        (= v ident) (dissoc-in state-map path)
-        (every? eql/ident? v) (merge/remove-ident* state-map ident path)
-        :else state-map)))
+;;"Removes a single, to-many and non-recursive cascased entity"
+(remove-entity* state2 [:person/id 1] #{:person/cars})
 
-(remove-idents-at-path state-map [:person/id 1 :person/cars] [:car/id 2])
-
-(remove-idents-at-path state-map [:person/id 1 :person/email] [:email/id 1])
+;;"Removes multiple, to-one and non-recursive cascased entity"
+(remove-entity* state2 [:person/id 1] #{:person/email :person/cars})
 
 
 
-(let [top-key :person/id]
-    (map (fn [k]
-           (if top-key
-             [top-key k]
-             [k]))
-         (keys (get state-map top-key))))
-
-
-(defn candidate-paths [state-map top-key]                 ; allow top-key to be nil to "mean" root node
-    (map (fn [k]
-           (if top-key
-             [top-key k]
-             [k]))
-         (keys (get state-map top-key))))
-
-
-
-
-(candidate-paths state-map :person/id)
-(candidate-paths state-map :car/id)
-(candidate-paths state-map nil)
-
-
-(paths state-map)
-
-
-(defn remove-ident-from-table [state-map ident]
-    (reduce
-      #(remove-idents-at-path %1 %2 ident)
-      state-map
-      (paths state-map)
-      #_(candidate-paths state-map table)))
-
-(remove-ident-from-table state-map [:person/id 1])
-(remove-ident-from-table state-map [:car/id 1])
-
-
-(reduce remove-ident-from-table
-          state-map
-          nil
-          #_tables)
-
-
-(def state-without-entity (->
-                              ;; remove the table-nested pointers to the entity
-                              (reduce remove-ident-from-table
-                                      state-map
-                                      tables)
-                              ;; remove the top-level edges that point to the entity
-                              (remove-ident-from-table nil)
-                              ;; remove the entity
-                              (dissoc-in ident)))
