@@ -93,19 +93,6 @@
     (filter #(< (count %) 4)
             (paths* () [] m))))
 
-(declare remove-entity*)
-
-(defn- cascade-delete*
-  [state1 starting-entity cascade]
-  (reduce
-   (fn [s edge]
-     (if (every? eql/ident? edge)
-       (reduce (fn [s2 ident] (remove-entity* s2 ident cascade)) s edge)
-       (remove-entity* s edge cascade)))
-   state1
-    ;; FIXME this must return an ident or vec of idents
-   (set/intersection (set cascade) (set (keys starting-entity)))))
-
 (>defn remove-entity*
        [state1 ident cascade]
        [map? eql/ident? (s/coll-of keyword? :kind set?) => map?]
@@ -144,36 +131,43 @@
                                            tables)
                                ;; remove the top-level entity
                                    (dissoc-in ident))
-             target-entity (clojure.core/get-in state1 ident)
-             final-state (cascade-delete* state-without-entity target-entity cascade)]
+             target-entity (get-in state1 ident)
+
+             final-state (reduce
+                          (fn [s edge]
+                            (if (every? eql/ident? edge)
+                              (reduce (fn [s2 ident] (remove-entity* s2 ident cascade)) s edge)
+                              (remove-entity* s edge cascade)))
+                          state-without-entity
+                          (map
+                           (fn [x] (clojure.core/get-in state1 (conj [:person/id (:person/id target-entity)] x))) ;; FIXME remove the hardwiring
+                           (set/intersection
+                            cascade
+                            (set (keys target-entity)))))]
+
          final-state))
+
 
 
 ;;;;;;;;;;;;;
 
 
 (def state1 {:fastest-car  [:car/id 1]
-            :grandparents [[:person/id 1] [:person/id 2]]
-            :denorm       {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]]
-                                               :b [:person/id 1]}}}
-            :person/id    {1 {:person/name  "person-1"
-                              :person/cars  [[:car/id 1] [:car/id 2]]
-                              :person/email [:email/id 1]}
-                           2 {:person/name  "person-2"
-                              :person/cars  [[:car/id 1]]
-                              :person/email [:email/id 2]}}
-            :car/id       {1 {:car/model "model-1"}
-                           2 {:car/model "model-2"}}
-            :email/id     {1 {:email/provider "Google"}
-                           2 {:email/provider "Microsoft"}}})
+             :grandparents [[:person/id 1] [:person/id 2]]
+             :denorm       {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]]
+                                                :b [:person/id 1]}}}
+             :person/id    {1 {:person/name  "person-1"
+                               :person/cars  [[:car/id 1] [:car/id 2]]
+                               :person/email [:email/id 1]}
+                            2 {:person/name  "person-2"
+                               :person/cars  [[:car/id 1]]
+                               :person/email [:email/id 2]}}
+             :car/id       {1 {:car/model "model-1"}
+                            2 {:car/model "model-2"}}
+             :email/id     {1 {:email/provider "Google"}
+                            2 {:email/provider "Microsoft"}}})
 
 ;; behavior-1
-(remove-entity* state1 [:person/id 1] #{})
-
-(remove-entity* state1 [:car/id 1] #{})
-
-(remove-entity* state1 [:person/id 1] #{})
-
 (remove-entity* state1 [:person/id 1] #{})
 
 (remove-entity* state1 [:email/id 1] #{})
@@ -184,22 +178,24 @@
 ;; behavior-2
 
 
-(def state2 {:person/id {1 {:person/name     "person-1"}
-                          :person/spouse   [:person/id 2]
-                          :person/email    [:email/id 1]
-                          :person/cars     [[:car/id 1]
-                                            [:car/id 2]]
-                          :person/children [[:person/id 3]]
-                          2 {:person/name     "person-2"
-                             :person/spouse   [:person/id 1]
-                             :person/children [[:person/id 3]]}
-                          3 {:person/name "person-3"}}
-             :car/id    {1 {:car/model "model-1"}
-                         2 {:car/model "model-2"}}
-             :engine/id {1 {:engine/name "engine-1"}}
-             :email/id  {1 {:email/provider "Google"}}})
-
-
+(def state2 {:person/id {1 {:person/id 1
+                            :person/spouse   [:person/id 2]
+                            :person/email    [:email/id 1]
+                            :person/cars     [[:car/id 1]
+                                              [:car/id 2]]
+                            :person/children [[:person/id 3]]}
+                         2 {:person/id 2
+                            :person/spouse   [:person/id 1]
+                            :person/children [[:person/id 3]]}
+                         3 {:person/id 3}}
+             :car/id    {1 {:car/id 1
+                            :car/model "model-1"}
+                         2 {:car/id 2
+                            :car/model "model-2"}}
+             :engine/id {1 {:engine/id 1
+                            :engine/name "engine-1"}}
+             :email/id  {1 {:email/id 1
+                            :email/provider "Google"}}})
 
 
 ;;"Removes a single, to-one and non-recursive cascased entity"
@@ -210,6 +206,24 @@
 
 ;;"Removes multiple, to-one and non-recursive cascased entity"
 (remove-entity* state2 [:person/id 1] #{:person/email :person/cars})
+
+
+;;;;;;;;;;;;;;;
+
+
+(let [state-map state2
+      starting-entity  (get-in state-map [:person/id 1])
+      cascade  #{:person/email :person/cars}]
+  (map
+   (fn [x] (clojure.core/get-in state-map (conj [:person/id (:person/id starting-entity)] x)))
+   (set/intersection
+    cascade
+    (set (keys starting-entity)))))
+
+
+
+(:person/id
+ (get-in state2 [:person/id 1]))
 
 
 
