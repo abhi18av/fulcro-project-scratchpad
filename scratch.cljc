@@ -160,7 +160,7 @@
                                      (let [vl (clojure.core/get-in state a-path)]
                                        (if (coll? vl)
                                          (or
-                                           (some #{ident} vl )
+                                           (some #{ident} vl)
                                            (= ident vl))
                                          (= ident (take 2 a-path)))))
                                    (normalized-paths state)))
@@ -204,22 +204,33 @@
 ;;================================
 
 (>defn remove-edge*
-  ;; TODO docstring
+  "Remove the given edge at the given path. Also scans all tables and removes any to-one or to-many idents that are
+  found that match `edge` (removes dangling pointers to the removed entity(ies).
+
+  The optional `cascade` parameter is a set of keywords that represent edges that should cause recursive deletes
+  (i.e. it indicates edge names that *own* something, indicating it is safe to remove those entities as well).
+
+  Returns the new state map with the entity(ies) removed."
+
   ([state-map path-to-edge]
    [map? vector? => any?]
    (remove-edge* state-map path-to-edge #{}))
 
-  ;; TODO implement cascading
+
   ([state-map path-to-edge cascade]
    [map? vector? (s/coll-of keyword? :kind set?) => map?]
-   (let [ident (clojure.core/get-in state-map path-to-edge)
+   (let [candidate (let [vl (clojure.core/get-in state-map path-to-edge)]
+                     (if-not (vector? vl)
+                       nil
+                      (cond
+                        (eql/ident? vl) [vl]
+                        (every? eql/ident? vl) vl)))
          final-state (if (some #{path-to-edge} (normalized-paths state-map))
                        (reduce
                          #(remove-entity* %1 %2 cascade)
                          state-map
-                         ;;FIXME this needs to be a vector of idents
-                         ident)
-                      state-map)]
+                         candidate)
+                       state-map)]
      final-state)))
 
 
@@ -239,24 +250,27 @@
                                 2 {:address/state "Idaho"}}}]
 
     ;(normalized-paths state)
-
+    ;;NOTE passes here since strings are `seq` of chars
+    (remove-edge* state [:address/id 1 :address/state])      ;=> state
+    ;;NOTE fails with numbers
+    ;(remove-edge* state [:person/id 1 :person/age])      ;=> state
+    ;;;;;
     ;;DONE
     ;"Refuses to remove a denormalized edge"
     ;(remove-edge* state [:denorm :level-1 :level2 :b])      ;=> state
-    ;;FIXME
+    ;;DONE
     ;"Removes top-level to-one edge"
     ;(remove-edge* state [:fastest-car])                     ;=> nil
     ;;DONE
     ;"Removes top-level to-many edge"
     ;(remove-edge* state [:favourite-cars])                  ;=> nil
-    ;;FIXME
+    ;;DONE
     ;"Removes table-nested to-one edge"
     ;(remove-edge* state [:person/id 1 :person/address])     ;=> nil
     ;;DONE
     ;"Removes table-nested to-many edge"
     ;(remove-edge* state [:person/id 1 :person/cars])        ;=> nil
     )
-
 
 
 
@@ -273,21 +287,18 @@
                                    :car/engine [:engine/id 2]}}
                :engine/id      {1 {:engine/id 1}
                                 2 {:engine/id 2}}}]
-
+    ;;DONE
     ;"Removes top-level to-one edge"
-    (nsh/remove-edge* state [:fastest-car] #{:car/engine})  ;=> true
-
-
+    ;(remove-edge* state [:fastest-car] #{:car/engine})  ;=> true
+    ;;DONE
     ;"Removes top-level to-many edge"
-    (nsh/remove-edge* state [:favourite-cars] #{:car/engine}) ;=> true
-
-
+    ;(remove-edge* state [:favourite-cars] #{:car/engine}) ;=> true
+    ;;DONE
     ;"Removes table-nested to-one edge"
-    (nsh/remove-edge* state [:person/id 1 :latest-car] #{:car/engine}) ;=> true
-
-
+    ;(remove-edge* state [:person/id 1 :latest-car] #{:car/engine}) ;=> true
+    ;;DONE
     ;"Removes table-nested to-many edge"
-    (nsh/remove-edge* state [:person/id 1 :person/cars] #{:car/engine}) ;=> true
+    ;(remove-edge* state [:person/id 1 :person/cars] #{:car/engine}) ;=> true
     )
 
 
@@ -301,28 +312,24 @@
                :car/id         {1 {:car/id     1
                                    :car/colors [[:color/id 1]]}
                                 2 {:car/id     2
-                                   :car/colors [[:color/id 2]
+                                   :car/colors [[:color/id 1]
                                                 [:color/id 2]]}}
                :color/id       {1 {:color/id 1}
                                 2 {:color/id 2}}}]
 
-    (assertions
-
-      ;"Removes top-level to-one edge"
-      (remove-edge* state [:fastest-car] #{:car/colors})    ;=> true
-
-
-      ;"Removes top-level to-many edge"
-      (nsh/remove-edge* state [:favourite-cars] #{:car/colors}) ;=> true
-
-
-      ;"Removes table-nested to-one edge"
-      (nsh/remove-edge* state [:person/id 1 :latest-car] #{:car/colors}) ;=> true
-
-
-      ;"Removes table-nested to-many edge"
-      (nsh/remove-edge* state [:person/id 1 :person/cars] #{:car/colors}) ;=> true
-      ))
+    ;;DONE
+    ;"Removes top-level to-one edge"
+    ;(remove-edge* state [:fastest-car] #{:car/colors})      ;=> true
+    ;;DONE
+    ;"Removes top-level to-many edge"
+    ;(remove-edge* state [:favourite-cars] #{:car/colors}) ;=> true
+    ;;DONE
+    ;"Removes table-nested to-one edge"
+    ;(remove-edge* state [:person/id 1 :latest-car] #{:car/colors}) ;=> true
+    ;;DONE
+    ;"Removes table-nested to-many edge"
+    ;(remove-edge* state [:person/id 1 :person/cars] #{:car/colors}) ;=> true
+    )
 
 
   '())
